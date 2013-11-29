@@ -1164,8 +1164,10 @@ enum GCDAsyncUdpSocketConfig
 			
 			struct sockaddr_in6 sockaddr6;
 			memset(&sockaddr6, 0, sizeof(sockaddr6));
-			
+
+#ifndef APPORTABLE
 			sockaddr6.sin6_len       = sizeof(struct sockaddr_in6);
+#endif
 			sockaddr6.sin6_family    = AF_INET6;
 			sockaddr6.sin6_port      = htons(port);
 			sockaddr6.sin6_addr      = in6addr_loopback;
@@ -1399,8 +1401,10 @@ enum GCDAsyncUdpSocketConfig
 		
 		struct sockaddr_in6 sockaddr6;
 		memset(&sockaddr6, 0, sizeof(sockaddr6));
-		
+
+#ifndef APPORTABLE
 		sockaddr6.sin6_len       = sizeof(sockaddr6);
+#endif
 		sockaddr6.sin6_family    = AF_INET6;
 		sockaddr6.sin6_port      = htons(port);
 		sockaddr6.sin6_addr      = in6addr_any;
@@ -1423,8 +1427,10 @@ enum GCDAsyncUdpSocketConfig
 		
 		struct sockaddr_in6 sockaddr6;
 		memset(&sockaddr6, 0, sizeof(sockaddr6));
-		
+
+#ifndef APPORTABLE
 		sockaddr6.sin6_len       = sizeof(struct sockaddr_in6);
+#endif
 		sockaddr6.sin6_family    = AF_INET6;
 		sockaddr6.sin6_port      = htons(port);
 		sockaddr6.sin6_addr      = in6addr_loopback;

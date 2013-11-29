@@ -2161,7 +2161,9 @@ enum GCDAsyncSocketConfig
 		memset(&(nativeAddr.sin_zero), 0, sizeof(nativeAddr.sin_zero));
 		
 		struct sockaddr_in6 nativeAddr6;
+#ifndef APPORTABLE
 		nativeAddr6.sin6_len       = sizeof(struct sockaddr_in6);
+#endif
 		nativeAddr6.sin6_family    = AF_INET6;
 		nativeAddr6.sin6_port      = htons(port);
 		nativeAddr6.sin6_flowinfo  = 0;
@@ -2697,8 +2699,12 @@ enum GCDAsyncSocketConfig
 	// invoke the cancel handler if the dispatch source is paused.
 	// So we have to unpause the source if needed.
 	// This allows the cancel handler to be run, which in turn releases the source and closes the socket.
-	
-	if (!accept4Source && !accept6Source && !readSource && !writeSource)
+#ifdef APPORTABLE
+	// dispatch_source_cancel doesn't work to close the sockets
+	if (YES)
+#else
+    if (!accept4Source && !accept6Source && !readSource && !writeSource)
+#endif
 	{
 		LogVerbose(@"manually closing close");
 
@@ -2716,7 +2722,9 @@ enum GCDAsyncSocketConfig
 			socket6FD = SOCKET_NULL;
 		}
 	}
+#ifndef APPORTABLE
 	else
+#endif
 	{
 		if (accept4Source)
 		{
@@ -2743,7 +2751,9 @@ enum GCDAsyncSocketConfig
 			LogVerbose(@"dispatch_source_cancel(readSource)");
 			dispatch_source_cancel(readSource);
 			
+#ifndef APPORTABLE
 			[self resumeReadSource];
+#endif
 			
 			readSource = NULL;
 		}
@@ -3493,7 +3503,9 @@ enum GCDAsyncSocketConfig
 		struct sockaddr_in6 sockaddr6;
 		memset(&sockaddr6, 0, sizeof(sockaddr6));
 		
+#ifndef APPORTABLE
 		sockaddr6.sin6_len       = sizeof(sockaddr6);
+#endif
 		sockaddr6.sin6_family    = AF_INET6;
 		sockaddr6.sin6_port      = htons(port);
 		sockaddr6.sin6_addr      = in6addr_any;
@@ -3516,7 +3528,9 @@ enum GCDAsyncSocketConfig
 		struct sockaddr_in6 sockaddr6;
 		memset(&sockaddr6, 0, sizeof(sockaddr6));
 		
+#ifndef APPORTABLE
 		sockaddr6.sin6_len       = sizeof(sockaddr6);
+#endif
 		sockaddr6.sin6_family    = AF_INET6;
 		sockaddr6.sin6_port      = htons(port);
 		sockaddr6.sin6_addr      = in6addr_loopback;
@@ -3624,10 +3638,29 @@ enum GCDAsyncSocketConfig
 		socketFDBytesAvailable = dispatch_source_get_data(readSource);
 		LogVerbose(@"socketFDBytesAvailable: %lu", socketFDBytesAvailable);
 		
+#ifdef APPORTABLE
+		// We can get sporadic EOF's. Make sure we see 10 zero reads in a row before
+		// causing the connection to be terminated
+		static int zeroCount = 0;
+		if (socketFDBytesAvailable > 0)
+		{
+			[self doReadData];
+			zeroCount = 0;
+		}
+		else
+		{
+			if (++zeroCount == 10)
+			{
+				[self doReadEOF];
+				zeroCount = 0;
+			}
+		}
+#else
 		if (socketFDBytesAvailable > 0)
 			[self doReadData];
 		else
 			[self doReadEOF];
+#endif
 	}});
 	
 	dispatch_source_set_event_handler(writeSource, ^{ @autoreleasepool {
@@ -3724,6 +3757,10 @@ enum GCDAsyncSocketConfig
 
 - (void)suspendReadSource
 {
+#ifdef APPORTABLE
+	return;
+#endif
+    
 	if (!(flags & kReadSourceSuspended))
 	{
 		LogVerbose(@"dispatch_suspend(readSource)");
@@ -4221,6 +4258,10 @@ enum GCDAsyncSocketConfig
 	BOOL hasBytesAvailable = NO;
 	unsigned long estimatedBytesAvailable;
 	
+#ifdef APPORTABLE
+	estimatedBytesAvailable = MAX(1, socketFDBytesAvailable);
+	hasBytesAvailable = YES;
+#else
 	if ([self usingCFStreamForTLS])
 	{
 		#if TARGET_OS_IPHONE
@@ -4281,6 +4322,7 @@ enum GCDAsyncSocketConfig
 		
 		#endif
 	}
+#endif
 	
 	if ((hasBytesAvailable == NO) && ([preBuffer availableBytes] == 0))
 	{
@@ -4432,6 +4474,10 @@ enum GCDAsyncSocketConfig
 	BOOL socketEOF = (flags & kSocketHasReadEOF) ? YES : NO;  // Nothing more to via socket (end of file)
 	BOOL waiting   = !done && !error && !socketEOF && !hasBytesAvailable; // Ran out of data, waiting for more
 	
+#ifdef APPORTABLE
+	socketEOF = NO;   // Reads will permanently block if it gets set to YES
+#endif
+    
 	if (!done && !error && !socketEOF && !waiting && hasBytesAvailable)
 	{
 		NSAssert(([preBuffer availableBytes] == 0), @"Invalid logic");
@@ -5840,19 +5886,19 @@ enum GCDAsyncSocketConfig
 			
 			NSNumber *value;
 			
-			value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLAllowsAnyRoot];
+			value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLAllowsAnyRoot];
 			if (value && [value boolValue] == YES)
 				canUseSecureTransport = NO;
 			
-			value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLAllowsExpiredRoots];
+			value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLAllowsExpiredRoots];
 			if (value && [value boolValue] == YES)
 				canUseSecureTransport = NO;
 			
-			value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLValidatesCertificateChain];
+			value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLValidatesCertificateChain];
 			if (value && [value boolValue] == NO)
 				canUseSecureTransport = NO;
 			
-			value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLAllowsExpiredCertificates];
+			value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLAllowsExpiredCertificates];
 			if (value && [value boolValue] == YES)
 				canUseSecureTransport = NO;
 		}
@@ -6129,7 +6175,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// Create SSLContext, and setup IO callbacks and connection ref
 	
-	BOOL isServer = [[tlsSettings objectForKey:(NSString *)kCFStreamSSLIsServer] boolValue];
+	BOOL isServer = [[tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLIsServer] boolValue];
 	
 	#if TARGET_OS_IPHONE
 	{
@@ -6186,7 +6232,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// 1. kCFStreamSSLPeerName
 	
-	value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLPeerName];
+	value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLPeerName];
 	if ([value isKindOfClass:[NSString class]])
 	{
 		NSString *peerName = (NSString *)value;
@@ -6204,7 +6250,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// 2. kCFStreamSSLAllowsAnyRoot
 	
-	value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLAllowsAnyRoot];
+	value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLAllowsAnyRoot];
 	if (value)
 	{
 		#if TARGET_OS_IPHONE
@@ -6225,7 +6271,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// 3. kCFStreamSSLAllowsExpiredRoots
 	
-	value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLAllowsExpiredRoots];
+	value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLAllowsExpiredRoots];
 	if (value)
 	{
 		#if TARGET_OS_IPHONE
@@ -6246,7 +6292,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// 4. kCFStreamSSLValidatesCertificateChain
 	
-	value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLValidatesCertificateChain];
+	value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLValidatesCertificateChain];
 	if (value)
 	{
 		#if TARGET_OS_IPHONE
@@ -6267,7 +6313,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// 5. kCFStreamSSLAllowsExpiredCertificates
 	
-	value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLAllowsExpiredCertificates];
+	value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLAllowsExpiredCertificates];
 	if (value)
 	{
 		#if TARGET_OS_IPHONE
@@ -6288,7 +6334,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// 6. kCFStreamSSLCertificates
 	
-	value = [tlsSettings objectForKey:(NSString *)kCFStreamSSLCertificates];
+	value = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLCertificates];
 	if (value)
 	{
 		CFArrayRef certs = (__bridge CFArrayRef)value;
@@ -6305,7 +6351,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	#if TARGET_OS_IPHONE
 	{
-		NSString *sslLevel = [tlsSettings objectForKey:(NSString *)kCFStreamSSLLevel];
+		NSString *sslLevel = [tlsSettings objectForKey:(__bridge NSString *)kCFStreamSSLLevel];
 		
 		NSString *sslMinLevel = [tlsSettings objectForKey:GCDAsyncSocketSSLProtocolVersionMin];
 		NSString *sslMaxLevel = [tlsSettings objectForKey:GCDAsyncSocketSSLProtocolVersionMax];
@@ -6319,11 +6365,11 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 			}
 			else
 			{
-				if ([sslLevel isEqualToString:(NSString *)kCFStreamSocketSecurityLevelSSLv3])
+				if ([sslLevel isEqualToString:(__bridge NSString *)kCFStreamSocketSecurityLevelSSLv3])
 				{
 					sslMinLevel = sslMaxLevel = @"kSSLProtocol3";
 				}
-				else if ([sslLevel isEqualToString:(NSString *)kCFStreamSocketSecurityLevelTLSv1])
+				else if ([sslLevel isEqualToString:(__bridge NSString *)kCFStreamSocketSecurityLevelTLSv1])
 				{
 					sslMinLevel = sslMaxLevel = @"kTLSProtocol1";
 				}
